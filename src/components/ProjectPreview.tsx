@@ -3,22 +3,51 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowDown, Code, Database, Download, FileDown, Play, Terminal } from "lucide-react";
+import { ArrowDown, Code, Database, Download, FileDown, Play, Terminal, AlertCircle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
-const CodeBlock = ({ code, language }: { code: string; language: string }) => (
+interface CodeBlockProps {
+  code: string;
+  language: string;
+}
+
+const CodeBlock = ({ code, language }: CodeBlockProps) => (
   <pre className="relative rounded-md bg-muted p-4 overflow-x-auto">
     <code className="text-xs font-mono">{code}</code>
   </pre>
 );
 
-const ProjectPreview = () => {
+interface ProjectPreviewProps {
+  generatedCode: any;
+  hasError: boolean;
+}
+
+const ProjectPreview = ({ generatedCode, hasError }: ProjectPreviewProps) => {
   const [activeTab, setActiveTab] = useState("code");
   
   const handleDownload = () => {
+    // Crea un blob con il contenuto del progetto
+    const projectString = JSON.stringify(generatedCode, null, 2);
+    const blob = new Blob([projectString], { type: "application/json" });
+    
+    // Crea un URL per il blob
+    const url = URL.createObjectURL(blob);
+    
+    // Crea un elemento <a> nascosto per scaricare il file
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "progetto-generato.json";
+    document.body.appendChild(a);
+    a.click();
+    
+    // Pulisci
+    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    
     toast.success("Progetto scaricato con successo!");
   };
   
@@ -26,92 +55,50 @@ const ProjectPreview = () => {
     toast.info("Avvio del progetto nell'ambiente di simulazione...");
   };
   
-  // Simulazioni di codice per il preview
-  const frontendCode = `import React, { useState, useEffect } from 'react';
-import { supabase } from './supabaseClient';
-import { AuthForm } from './components/AuthForm';
-import { Dashboard } from './components/Dashboard';
-
-function App() {
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-      }
+  // Se non c'è codice generato, mostra un messaggio
+  if (!generatedCode) {
+    return (
+      <Card className="w-full glass-card">
+        <CardHeader>
+          <CardTitle className="text-xl">Anteprima progetto</CardTitle>
+          <CardDescription>
+            Nessun progetto generato
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center p-12">
+          <p className="text-muted-foreground">
+            Chiedi all'assistente di generare un progetto
+          </p>
+        </CardContent>
+      </Card>
     );
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  if (loading) {
-    return <div>Caricamento...</div>;
   }
-
-  return (
-    <div className="container mx-auto px-4 py-8">
-      {!session ? <AuthForm /> : <Dashboard session={session} />}
-    </div>
+  
+  // Estrai i file dal codice generato
+  const files = generatedCode.structure?.files || [];
+  
+  // Raggruppa i file per tipo (frontend, backend, database)
+  const frontendFiles = files.filter(file => 
+    file.path.includes('.jsx') || 
+    file.path.includes('.tsx') || 
+    file.path.includes('.js') || 
+    file.path.includes('.ts') ||
+    file.path.includes('.css') ||
+    file.path.includes('.html')
   );
-}
-
-export default App;`;
-
-  const backendCode = `// Supabase RLS policy
-CREATE POLICY "Enable read access for authenticated users only"
-ON public.orders
-FOR SELECT
-TO authenticated
-USING (auth.uid() = user_id);
-
-// Order API endpoint
-export async function getOrders(req, res) {
-  try {
-    const { data, error } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('user_id', req.user.id)
-      .order('created_at', { ascending: false });
-      
-    if (error) throw error;
-    
-    return res.status(200).json(data);
-  } catch (error) {
-    return res.status(400).json({ error: error.message });
-  }
-}`;
-
-  const databaseSchema = `-- Create users table extension
-CREATE TABLE IF NOT EXISTS public.profiles (
-  id UUID REFERENCES auth.users NOT NULL PRIMARY KEY,
-  name TEXT,
-  email TEXT,
-  avatar_url TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- Create orders table
-CREATE TABLE IF NOT EXISTS public.orders (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID REFERENCES public.profiles(id) NOT NULL,
-  status TEXT NOT NULL,
-  total NUMERIC(10,2) NOT NULL,
-  items JSONB NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- Set up Row Level Security
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;`;
+  
+  const backendFiles = files.filter(file => 
+    file.path.includes('api/') || 
+    file.path.includes('server/') || 
+    file.path.includes('backend/')
+  );
+  
+  const databaseFiles = files.filter(file => 
+    file.path.includes('.sql') || 
+    file.path.includes('schema') || 
+    file.path.includes('migration') ||
+    file.path.includes('database')
+  );
   
   return (
     <Card className="w-full glass-card">
@@ -120,6 +107,9 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;`;
           <CardTitle className="text-xl">
             Preview progetto
             <Badge className="ml-2 bg-secondary">Generato</Badge>
+            {hasError && (
+              <Badge className="ml-2 bg-destructive">Errori</Badge>
+            )}
           </CardTitle>
           <CardDescription>
             Anteprima del codice e della struttura del progetto
@@ -138,6 +128,15 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;`;
       </CardHeader>
       
       <CardContent className="p-0">
+        {hasError && (
+          <Alert variant="destructive" className="mx-6 my-2">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Sono stati rilevati errori nel codice generato. Usa il pulsante "Correggi Errori" per tentare di risolverli.
+            </AlertDescription>
+          </Alert>
+        )}
+        
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="border-b px-6">
             <TabsList className="w-full justify-start">
@@ -147,7 +146,7 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;`;
               </TabsTrigger>
               <TabsTrigger value="structure" className="gap-2">
                 <Database size={14} />
-                Database
+                Struttura
               </TabsTrigger>
               <TabsTrigger value="console" className="gap-2">
                 <Terminal size={14} />
@@ -158,57 +157,110 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;`;
           
           <TabsContent value="code" className="p-6">
             <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <h3 className="font-medium">src/App.jsx</h3>
-                <Button variant="ghost" size="icon">
-                  <ArrowDown className="h-4 w-4" />
-                </Button>
-              </div>
-              <ScrollArea className="h-56 border rounded-md">
-                <CodeBlock code={frontendCode} language="jsx" />
-              </ScrollArea>
+              {frontendFiles.length > 0 ? (
+                frontendFiles.slice(0, 2).map((file, index) => (
+                  <div key={index}>
+                    <div className="flex justify-between items-center">
+                      <h3 className="font-medium">{file.path}</h3>
+                      <Button variant="ghost" size="icon">
+                        <ArrowDown className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <ScrollArea className="h-56 border rounded-md">
+                      <CodeBlock 
+                        code={file.content} 
+                        language={file.path.split('.').pop() || "jsx"} 
+                      />
+                    </ScrollArea>
+                    {index < frontendFiles.length - 1 && <Separator className="my-4" />}
+                  </div>
+                ))
+              ) : (
+                <p className="text-muted-foreground text-center py-4">Nessun file frontend trovato</p>
+              )}
               
-              <Separator />
+              {frontendFiles.length > 2 && (
+                <div className="mt-2 text-center">
+                  <Button variant="outline" size="sm">
+                    Vedi altri {frontendFiles.length - 2} file
+                  </Button>
+                </div>
+              )}
               
-              <div className="flex justify-between items-center">
-                <h3 className="font-medium">src/api/orders.js</h3>
-                <Button variant="ghost" size="icon">
-                  <ArrowDown className="h-4 w-4" />
-                </Button>
-              </div>
-              <ScrollArea className="h-56 border rounded-md">
-                <CodeBlock code={backendCode} language="js" />
-              </ScrollArea>
+              {backendFiles.length > 0 && (
+                <>
+                  <Separator className="my-6" />
+                  <h3 className="text-lg font-medium mb-4">Backend</h3>
+                  
+                  {backendFiles.slice(0, 1).map((file, index) => (
+                    <div key={index}>
+                      <div className="flex justify-between items-center">
+                        <h3 className="font-medium">{file.path}</h3>
+                        <Button variant="ghost" size="icon">
+                          <ArrowDown className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <ScrollArea className="h-56 border rounded-md">
+                        <CodeBlock 
+                          code={file.content} 
+                          language={file.path.split('.').pop() || "js"} 
+                        />
+                      </ScrollArea>
+                    </div>
+                  ))}
+                  
+                  {backendFiles.length > 1 && (
+                    <div className="mt-2 text-center">
+                      <Button variant="outline" size="sm">
+                        Vedi altri {backendFiles.length - 1} file
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </TabsContent>
           
           <TabsContent value="structure" className="p-6">
             <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <h3 className="font-medium">schema.sql</h3>
-                <Button variant="ghost" size="icon">
-                  <ArrowDown className="h-4 w-4" />
-                </Button>
-              </div>
-              <ScrollArea className="h-64 border rounded-md">
-                <CodeBlock code={databaseSchema} language="sql" />
-              </ScrollArea>
+              {databaseFiles.length > 0 ? (
+                <div>
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-medium">{databaseFiles[0].path}</h3>
+                    <Button variant="ghost" size="icon">
+                      <ArrowDown className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <ScrollArea className="h-64 border rounded-md">
+                    <CodeBlock 
+                      code={databaseFiles[0].content} 
+                      language="sql" 
+                    />
+                  </ScrollArea>
+                </div>
+              ) : (
+                <p className="text-muted-foreground text-center py-4">Nessuno schema database trovato</p>
+              )}
               
               <div className="flex flex-col gap-2 mt-4">
-                <div className="flex items-center justify-between bg-muted/50 p-3 rounded-md">
-                  <div className="flex items-center gap-2">
-                    <Database size={16} />
-                    <span className="font-medium text-sm">profiles</span>
-                  </div>
-                  <Badge variant="outline">4 colonne</Badge>
-                </div>
-                <div className="flex items-center justify-between bg-muted/50 p-3 rounded-md">
-                  <div className="flex items-center gap-2">
-                    <Database size={16} />
-                    <span className="font-medium text-sm">orders</span>
-                  </div>
-                  <Badge variant="outline">7 colonne</Badge>
-                </div>
+                <h3 className="text-md font-medium mb-2">Struttura del progetto</h3>
+                {files.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-4">Nessun file nel progetto</p>
+                ) : (
+                  files.map((file, index) => (
+                    <div key={index} className="flex items-center justify-between bg-muted/50 p-3 rounded-md">
+                      <div className="flex items-center gap-2">
+                        <Code size={16} />
+                        <span className="font-medium text-sm">{file.path}</span>
+                      </div>
+                      <Badge variant="outline">
+                        {file.content.length < 1000 
+                          ? `${file.content.length} caratteri`
+                          : `${Math.round(file.content.length / 1000)} KB`}
+                      </Badge>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </TabsContent>
@@ -216,17 +268,23 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;`;
           <TabsContent value="console" className="p-6">
             <ScrollArea className="h-64 border rounded-md bg-black text-green-400 p-4">
               <div className="font-mono text-xs">
-                <p>$ npm install</p>
+                <p>$ Inizializzazione ambiente locale</p>
+                <p className="opacity-70">Creazione struttura progetto...</p>
+                <p className="opacity-70">Installazione dipendenze...</p>
                 <p className="opacity-70">+ react@18.2.0</p>
                 <p className="opacity-70">+ tailwindcss@3.3.0</p>
                 <p className="opacity-70">+ @supabase/supabase-js@2.21.0</p>
                 <p className="opacity-70">added 267 packages in 12s</p>
-                <p>$ npm run build</p>
-                <p className="opacity-70">&gt; build</p>
-                <p className="opacity-70">&gt; vite build</p>
-                <p className="opacity-70">vite v5.0.0 building for production...</p>
-                <p className="opacity-70">✓ 321 modules transformed.</p>
-                <p className="text-yellow-400">√ Build completed. The dist directory is ready to be deployed.</p>
+                <p className="opacity-70">Generazione codice...</p>
+                <p className="opacity-70">Creati {files.length} file</p>
+                {hasError ? (
+                  <>
+                    <p className="text-yellow-400">⚠ Attenzione: rilevati errori nel codice</p>
+                    <p className="text-yellow-400">Utilizzare il pulsante 'Correggi Errori' per risolverli</p>
+                  </>
+                ) : (
+                  <p className="text-green-400">√ Build completato con successo!</p>
+                )}
               </div>
             </ScrollArea>
           </TabsContent>

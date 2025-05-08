@@ -3,10 +3,24 @@ import { useState, useRef, useEffect } from "react";
 import Header from "@/components/Header";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Send, MessageSquare, User, Loader, Bug, Code, Monitor } from "lucide-react";
+import { 
+  Send, 
+  MessageSquare, 
+  User, 
+  Loader, 
+  Bug, 
+  Code, 
+  Monitor, 
+  AlertCircle, 
+  CheckCircle,
+  Server
+} from "lucide-react";
 import { toast } from "sonner";
 import ProjectPreview from "@/components/ProjectPreview";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import useOllama from "@/hooks/useOllama";
+import { generateResponse, generateProjectCode, analyzeCodeForErrors } from "@/services/ollamaService";
 
 type Message = {
   id: string;
@@ -19,7 +33,7 @@ const ChatBot = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
-      content: "Ciao! Sono l'assistente di Local Magic Factory. Descrivi il progetto che vuoi creare e ti aiuterò a generarlo.",
+      content: "Ciao! Sono l'assistente di Local Magic Factory. Descrivi il progetto che vuoi creare e ti aiuterò a generarlo utilizzando modelli di AI locali.",
       role: "assistant",
       timestamp: new Date(),
     },
@@ -29,9 +43,13 @@ const ChatBot = () => {
   const [activeView, setActiveView] = useState<"chat" | "preview">("chat");
   const [projectGenerated, setProjectGenerated] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [generatedCode, setGeneratedCode] = useState<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Hook per la connessione con Ollama
+  const ollama = useOllama();
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
 
     // Add user message
@@ -59,97 +77,169 @@ const ChatBot = () => {
       input.toLowerCase().includes("risolvi") || 
       input.toLowerCase().includes("fix");
 
-    // Simulate AI processing with local models
-    setTimeout(() => {
-      let aiResponse: Message;
+    try {
+      // Verifica che Ollama sia disponibile
+      if (!ollama.isAvailable) {
+        const aiResponse: Message = {
+          id: (Date.now() + 1).toString(),
+          content: "Non sono riuscito a connettermi a Ollama. Verifica che sia in esecuzione sul tuo sistema per utilizzare i modelli di AI locali.",
+          role: "assistant",
+          timestamp: new Date(),
+        };
+        
+        setMessages((prev) => [...prev, aiResponse]);
+        setIsLoading(false);
+        return;
+      }
 
       if (isGenerationRequest) {
-        // Project generation response
-        aiResponse = {
+        // Aggiungi un messaggio di elaborazione
+        const processingMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: "Sto generando il progetto in base alla tua descrizione. Utilizzo modelli di AI locali per creare l'applicazione completa. Puoi vedere un'anteprima nella tab 'Preview' quando sarà pronto.",
+          content: "Sto generando il progetto in base alla tua descrizione. Utilizzo modelli di AI locali per creare l'applicazione completa. Questo potrebbe richiedere alcuni secondi...",
           role: "assistant",
           timestamp: new Date(),
         };
         
-        // After a short delay, simulate project generation completion
-        setTimeout(() => {
-          setProjectGenerated(true);
-          // Simulate occasional errors in the generated project
-          const randomError = Math.random() > 0.7;
-          setHasError(randomError);
-          
-          if (randomError) {
-            toast.error("Errore rilevato nel progetto generato", {
-              description: "Puoi cliccare sul pulsante 'Correggi' per risolvere automaticamente.",
-              duration: 5000,
-            });
-          } else {
-            toast.success("Progetto generato con successo!", {
-              description: "Puoi visualizzare l'anteprima nella tab 'Preview'.",
-              duration: 3000,
-            });
-          }
-        }, 3000);
-      } else if (isFixRequest || input.toLowerCase().includes("errore")) {
-        // Fix errors response
-        aiResponse = {
-          id: (Date.now() + 1).toString(),
-          content: "Sto analizzando e correggendo gli errori nel progetto. Utilizzo modelli di AI locali per identificare e risolvere i problemi in modo automatico.",
-          role: "assistant",
-          timestamp: new Date(),
-        };
+        setMessages((prev) => [...prev, processingMessage]);
         
-        // After a short delay, simulate error fixing
-        setTimeout(() => {
-          setHasError(false);
-          toast.success("Errori corretti con successo!", {
-            duration: 3000,
-          });
-        }, 2500);
-      } else if (input.toLowerCase().includes("supabase") || input.toLowerCase().includes("database")) {
-        // Supabase connection response
-        aiResponse = {
-          id: (Date.now() + 1).toString(),
-          content: "Sto configurando la connessione con Supabase per il tuo progetto. Questo ci permetterà di avere un database PostgreSQL, autenticazione, storage e funzioni edge direttamente nel tuo ambiente locale.",
-          role: "assistant",
-          timestamp: new Date(),
-        };
-        
-        toast.info("Connessione con Supabase in corso...", {
-          duration: 2000,
+        // Genera il progetto utilizzando Ollama
+        const projectCode = await generateProjectCode(input, {
+          model: ollama.selectedModel
         });
         
-        setTimeout(() => {
-          toast.success("Connessione con Supabase stabilita", {
-            duration: 3000,
-          });
-        }, 2000);
-      } else {
-        // Default response
-        aiResponse = {
-          id: (Date.now() + 1).toString(),
-          content: generateAIResponse(input),
+        setGeneratedCode(projectCode);
+        setProjectGenerated(true);
+        
+        // Analizza il codice per errori
+        const analysis = await analyzeCodeForErrors(JSON.stringify(projectCode));
+        const hasErrors = analysis.hasErrors;
+        setHasError(hasErrors);
+        
+        // Costruisci la risposta in base all'esito
+        const completionMessage: Message = {
+          id: (Date.now() + 2).toString(),
+          content: hasErrors 
+            ? `Ho generato il progetto, ma ho riscontrato alcuni potenziali problemi:\n\n${analysis.errors.join('\n')}\n\nPuoi utilizzare il pulsante 'Correggi Errori' per tentare di risolverli automaticamente.` 
+            : "Ho generato con successo il progetto richiesto! Puoi visualizzarne l'anteprima nella scheda 'Preview'.",
           role: "assistant",
           timestamp: new Date(),
         };
-      }
-      
-      setMessages((prev) => [...prev, aiResponse]);
-      setIsLoading(false);
-    }, 1500);
-  };
+        
+        setMessages((prev) => [...prev, completionMessage]);
+        
+        if (hasErrors) {
+          toast.error("Errore rilevato nel progetto generato", {
+            description: "Clicca sul pulsante 'Correggi' per risolvere automaticamente.",
+            duration: 5000,
+          });
+        } else {
+          toast.success("Progetto generato con successo!", {
+            description: "Puoi visualizzare l'anteprima nella tab 'Preview'.",
+            duration: 3000,
+          });
+        }
+      } else if (isFixRequest) {
+        // Richiesta di correzione errori
+        const fixingMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          content: "Sto analizzando e correggendo gli errori nel progetto. Utilizzo modelli di AI locali per identificare e risolvere i problemi.",
+          role: "assistant",
+          timestamp: new Date(),
+        };
+        
+        setMessages((prev) => [...prev, fixingMessage]);
+        
+        // Modifica il codice per correggere gli errori
+        if (generatedCode) {
+          const fixPrompt = `
+Il seguente codice presenta errori. Correggi gli errori mantenendo la stessa struttura:
 
-  const generateAIResponse = (prompt: string): string => {
-    // Responses based on specific keywords to simulate local AI model responses
-    if (prompt.toLowerCase().includes("modifica") || prompt.toLowerCase().includes("aggiorna")) {
-      return "Posso modificare il codice del progetto. Dimmi cosa vuoi cambiare e utilizzerò i modelli locali per aggiornare il codice mantenendo la coerenza dell'applicazione.";
-    } else if (prompt.toLowerCase().includes("autenticazione") || prompt.toLowerCase().includes("login")) {
-      return "Posso implementare un sistema di autenticazione completo con login, registrazione e gestione profili nel tuo progetto locale. Utilizzerò Supabase Auth per la gestione delle credenziali.";
-    } else if (prompt.toLowerCase().includes("stile") || prompt.toLowerCase().includes("design")) {
-      return "Posso migliorare il design dell'applicazione utilizzando Tailwind CSS e Shadcn UI. Fammi sapere quali sono le tue preferenze di stile e implementerò le modifiche necessarie.";
-    } else {
-      return "Grazie per le informazioni! I modelli di AI locali stanno elaborando la tua richiesta. Posso aiutarti a sviluppare, modificare o migliorare qualsiasi aspetto del progetto. Hai domande specifiche o funzionalità che vorresti aggiungere?";
+${JSON.stringify(generatedCode)}
+
+Rispondi SOLO con il JSON corretto nella stessa struttura.`;
+          
+          const fixedCode = await generateResponse(fixPrompt, ollama.selectedModel);
+          
+          // Cerca di estrarre e analizzare il JSON dalla risposta
+          try {
+            const jsonMatch = fixedCode.match(/```json\n([\s\S]*?)\n```/) || 
+                             fixedCode.match(/```([\s\S]*?)```/) || 
+                             [null, fixedCode];
+            
+            const jsonContent = jsonMatch[1] || fixedCode;
+            const parsedCode = JSON.parse(jsonContent);
+            
+            setGeneratedCode(parsedCode);
+            setHasError(false);
+            
+            const fixCompletedMessage: Message = {
+              id: (Date.now() + 2).toString(),
+              content: "Ho corretto gli errori nel codice. Il progetto dovrebbe ora funzionare correttamente.",
+              role: "assistant",
+              timestamp: new Date(),
+            };
+            
+            setMessages((prev) => [...prev, fixCompletedMessage]);
+            
+            toast.success("Errori corretti con successo!", {
+              duration: 3000,
+            });
+          } catch (error) {
+            console.error("Errore nel parsing del codice corretto:", error);
+            
+            const errorMessage: Message = {
+              id: (Date.now() + 2).toString(),
+              content: "Ho avuto difficoltà a correggere alcuni errori. Prova a essere più specifico sulla natura del problema.",
+              role: "assistant",
+              timestamp: new Date(),
+            };
+            
+            setMessages((prev) => [...prev, errorMessage]);
+          }
+        } else {
+          const noCodeMessage: Message = {
+            id: (Date.now() + 2).toString(),
+            content: "Non ho trovato alcun codice da correggere. Genera prima un progetto.",
+            role: "assistant",
+            timestamp: new Date(),
+          };
+          
+          setMessages((prev) => [...prev, noCodeMessage]);
+        }
+      } else {
+        // Genera una risposta generica utilizzando Ollama
+        const response = await generateResponse(
+          `Sei un assistente AI di sviluppo chiamato Local Magic Factory. Rispondi alla seguente domanda o richiesta in italiano in modo utile, conciso e amichevole. Se riguarda la generazione di codice o di un progetto, consiglia di usare la parola "genera" o "crea" seguita dalla descrizione del progetto. La richiesta è: ${input}`,
+          ollama.selectedModel
+        );
+        
+        const aiResponse: Message = {
+          id: (Date.now() + 1).toString(),
+          content: response || "Mi dispiace, non sono riuscito a generare una risposta. Prova a riformulare la tua richiesta.",
+          role: "assistant",
+          timestamp: new Date(),
+        };
+        
+        setMessages((prev) => [...prev, aiResponse]);
+      }
+    } catch (error) {
+      console.error("Errore durante l'interazione con Ollama:", error);
+      
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: "Si è verificato un errore durante l'elaborazione della richiesta. Verifica che Ollama sia in esecuzione e riprova.",
+        role: "assistant",
+        timestamp: new Date(),
+      };
+      
+      setMessages((prev) => [...prev, errorMessage]);
+      
+      toast.error("Errore di comunicazione", {
+        description: "Impossibile comunicare con il modello locale",
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -160,7 +250,7 @@ const ChatBot = () => {
     }
   };
 
-  const handleFixErrors = () => {
+  const handleFixErrors = async () => {
     // Add user message asking to fix errors
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -172,23 +262,78 @@ const ChatBot = () => {
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
 
-    // Simulate AI fixing errors
-    setTimeout(() => {
-      const aiResponse: Message = {
+    try {
+      const fixingMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: "Ho identificato e corretto gli errori nel progetto. Il problema principale era legato a incompatibilità di tipi TypeScript e alcuni componenti mancanti. Ora il progetto dovrebbe funzionare correttamente.",
+        content: "Sto analizzando e correggendo gli errori nel progetto...",
         role: "assistant",
         timestamp: new Date(),
       };
       
-      setMessages((prev) => [...prev, aiResponse]);
-      setIsLoading(false);
-      setHasError(false);
+      setMessages((prev) => [...prev, fixingMessage]);
       
-      toast.success("Errori corretti con successo!", {
-        duration: 3000,
-      });
-    }, 2500);
+      // Modifica il codice per correggere gli errori
+      if (generatedCode) {
+        const fixPrompt = `
+Il seguente codice presenta errori. Correggi gli errori mantenendo la stessa struttura:
+
+${JSON.stringify(generatedCode)}
+
+Rispondi SOLO con il JSON corretto nella stessa struttura.`;
+        
+        const fixedCode = await generateResponse(fixPrompt, ollama.selectedModel);
+        
+        // Cerca di estrarre e analizzare il JSON dalla risposta
+        try {
+          const jsonMatch = fixedCode.match(/```json\n([\s\S]*?)\n```/) || 
+                           fixedCode.match(/```([\s\S]*?)```/) || 
+                           [null, fixedCode];
+          
+          const jsonContent = jsonMatch[1] || fixedCode;
+          const parsedCode = JSON.parse(jsonContent);
+          
+          setGeneratedCode(parsedCode);
+          setHasError(false);
+          
+          const fixCompletedMessage: Message = {
+            id: (Date.now() + 2).toString(),
+            content: "Ho identificato e corretto gli errori nel progetto. Il problema principale era legato a incompatibilità di tipi TypeScript e alcuni componenti mancanti. Ora il progetto dovrebbe funzionare correttamente.",
+            role: "assistant",
+            timestamp: new Date(),
+          };
+          
+          setMessages((prev) => [...prev, fixCompletedMessage]);
+          
+          toast.success("Errori corretti con successo!", {
+            duration: 3000,
+          });
+        } catch (error) {
+          console.error("Errore nel parsing del codice corretto:", error);
+          
+          const errorMessage: Message = {
+            id: (Date.now() + 2).toString(),
+            content: "Ho avuto difficoltà a correggere alcuni errori. Prova a essere più specifico sulla natura del problema.",
+            role: "assistant",
+            timestamp: new Date(),
+          };
+          
+          setMessages((prev) => [...prev, errorMessage]);
+        }
+      }
+    } catch (error) {
+      console.error("Errore durante la correzione:", error);
+      
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: "Si è verificato un errore durante la correzione. Riprova più tardi.",
+        role: "assistant",
+        timestamp: new Date(),
+      };
+      
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -219,15 +364,40 @@ const ChatBot = () => {
               </Button>
             )}
             <Button 
-              variant="outline" 
+              variant={ollama.isAvailable ? "outline" : "destructive"}
               size="sm" 
-              className="gap-2 border-green-500 text-green-600 hover:bg-green-50"
-              onClick={() => toast.info("Connessione a Supabase...")}
+              className={`gap-2 ${ollama.isAvailable ? "border-green-500 text-green-600 hover:bg-green-50" : ""}`}
+              onClick={ollama.checkAvailability}
+              disabled={ollama.isChecking}
             >
-              Connetti Supabase
+              <Server size={16} />
+              {ollama.isChecking ? "Connessione..." : 
+               ollama.isAvailable ? `Ollama: ${ollama.selectedModel}` : "Ollama non disponibile"}
             </Button>
           </div>
         </div>
+        
+        {!ollama.isAvailable && !ollama.isChecking && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Ollama non è disponibile. Assicurati che sia in esecuzione sul tuo sistema 
+              (http://localhost:11434) e che abbia almeno un modello installato.
+            </AlertDescription>
+          </Alert>
+        )}
+        
+        {ollama.isAvailable && (
+          <Alert variant="default" className="mb-4 bg-green-50 border-green-200">
+            <CheckCircle className="h-4 w-4 text-green-500" />
+            <AlertDescription>
+              Connesso a Ollama. Modello attuale: <strong>{ollama.selectedModel}</strong>. 
+              {ollama.availableModels.length > 0 && (
+                <span> Modelli disponibili: {ollama.availableModels.join(", ")}</span>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
         
         <div className="flex-1 flex flex-col lg:flex-row gap-4">
           <div className="w-full lg:w-1/2 flex flex-col">
@@ -250,7 +420,11 @@ const ChatBot = () => {
                   <MessageSquare size={18} className="text-primary" />
                   Assistente di progetto
                 </h2>
-                <p className="text-xs text-muted-foreground">100% locale e gratuito</p>
+                <p className="text-xs text-muted-foreground">
+                  {ollama.isAvailable 
+                    ? `100% locale e gratuito - Modello: ${ollama.selectedModel}`
+                    : "Modelli locali non disponibili - Verifica Ollama"}
+                </p>
               </div>
               
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -304,14 +478,20 @@ const ChatBot = () => {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder="Descrivi il progetto che vuoi creare..."
+                    disabled={!ollama.isAvailable}
                     className="flex-1"
                   />
-                  <Button onClick={handleSend} disabled={!input.trim() || isLoading}>
+                  <Button 
+                    onClick={handleSend} 
+                    disabled={!input.trim() || isLoading || !ollama.isAvailable}
+                  >
                     <Send size={18} />
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Premi Invio per inviare, Shift+Invio per andare a capo
+                  {ollama.isAvailable 
+                    ? "Premi Invio per inviare, Shift+Invio per andare a capo" 
+                    : "Connetti Ollama per utilizzare i modelli locali"}
                 </p>
               </div>
             </div>
@@ -319,7 +499,7 @@ const ChatBot = () => {
           
           <div className={`w-full lg:w-1/2 ${activeView === "preview" ? "block" : "hidden lg:block"}`}>
             {projectGenerated ? (
-              <ProjectPreview />
+              <ProjectPreview generatedCode={generatedCode} hasError={hasError} />
             ) : (
               <div className="h-full bg-white rounded-lg border shadow-sm p-6 flex flex-col items-center justify-center">
                 <Code size={48} className="text-muted-foreground mb-4" />
