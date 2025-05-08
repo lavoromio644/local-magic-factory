@@ -3,12 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Code, Database, Plus, GitBranch, User, Settings } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 
 const Header = () => {
   const [projectName, setProjectName] = useState("Local Magic Factory");
+  const navigate = useNavigate();
   
   const handleNewProject = () => {
-    toast.info("Creazione di un nuovo progetto...");
+    navigate("/chatbot");
   };
   
   const handleMyProjects = () => {
