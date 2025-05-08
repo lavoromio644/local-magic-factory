@@ -92,4 +92,24 @@
   .glass-card {
     @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-lg;
   }
+  
+  .bg-gradient-magic {
+    @apply bg-gradient-to-r from-primary to-secondary;
+  }
+  
+  .interactive-button {
+    @apply transition-all hover:scale-105;
+  }
+  
+  .chat-bubble {
+    @apply p-4 rounded-2xl max-w-[80%];
+  }
+  
+  .chat-bubble-user {
+    @apply bg-primary/10 text-foreground ml-auto;
+  }
+  
+  .chat-bubble-ai {
+    @apply bg-muted/50 text-foreground mr-auto;
+  }
 }

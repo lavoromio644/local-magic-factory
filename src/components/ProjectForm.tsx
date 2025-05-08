@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,16 +19,18 @@ const ProjectForm = () => {
     }
     
     setIsGenerating(true);
-    toast.promise(
-      new Promise((resolve) => setTimeout(resolve, 3000)),
-      {
-        loading: "Generazione del progetto in corso...",
-        success: "Progetto generato con successo!",
-        error: "Si è verificato un errore durante la generazione",
-      }
-    ).finally(() => {
-      setIsGenerating(false);
-    });
+    
+    // Utilizziamo una Promise per simulare il processo di generazione
+    new Promise((resolve) => setTimeout(resolve, 3000))
+      .then(() => {
+        toast.success("Progetto generato con successo!");
+      })
+      .catch(() => {
+        toast.error("Si è verificato un errore durante la generazione");
+      })
+      .finally(() => {
+        setIsGenerating(false);
+      });
   };
   
   return (
